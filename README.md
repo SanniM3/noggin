@@ -2,7 +2,7 @@
 
 Inspired by the noggin card game.
 
-![Noggin Web](https://via.placeholder.com/800x400?text=Noggin+Web)
+![Noggin Web](https://nogginn.netlify.app/)
 
 ## 🎮 Features
 
