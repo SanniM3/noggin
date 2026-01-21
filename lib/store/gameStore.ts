@@ -26,6 +26,7 @@ interface GameState {
   feedback: FeedbackState;
   isLoading: boolean;
   isValidating: boolean; // AI validation in progress
+  validationStartTime: number | null; // When validation started (for pausing timer)
   
   // Event log
   eventLog: GameEvent[];
@@ -50,6 +51,7 @@ interface GameState {
   
   // Computed
   getCurrentRule: () => ReturnType<typeof getRule>;
+  getEffectiveElapsedTime: () => number; // Elapsed time minus paused time
 }
 
 interface StartRunOptions {
@@ -81,6 +83,7 @@ export const useGameStore = create<GameState>()(
     feedback: { visible: false, type: 'correct' },
     isLoading: false,
     isValidating: false,
+    validationStartTime: null,
     eventLog: [],
     settings: {
       useAIValidation: true, // AI validation enabled by default
@@ -107,6 +110,7 @@ export const useGameStore = create<GameState>()(
         selectedRuleId: options.selectedRuleId,
         timerDuration: options.timerDuration,
         duration: options.timerDuration, // Used by Timer component
+        pausedTime: 0, // Track time paused during validation
       };
       
       set({
@@ -290,9 +294,13 @@ export const useGameStore = create<GameState>()(
       
       // Step 2: If AI validation is enabled and not self-override, call AI
       if (settings.useAIValidation && !selfOverride) {
+        // Record when validation started (to pause timer)
+        const validationStart = Date.now();
+        
         // Show validating state
         set({ 
           isValidating: true,
+          validationStartTime: validationStart,
           feedback: {
             visible: true,
             type: 'warning',
@@ -311,7 +319,7 @@ export const useGameStore = create<GameState>()(
           // Get fresh state after async call
           const freshState = get();
           if (!freshState.run || !freshState.currentRound) {
-            set({ isValidating: false });
+            set({ isValidating: false, validationStartTime: null });
             return;
           }
           
@@ -327,7 +335,21 @@ export const useGameStore = create<GameState>()(
           };
         }
         
-        set({ isValidating: false });
+        // Calculate how long validation took and add to paused time
+        const validationDuration = Date.now() - validationStart;
+        const freshRun = get().run;
+        if (freshRun) {
+          set({ 
+            isValidating: false, 
+            validationStartTime: null,
+            run: {
+              ...freshRun,
+              pausedTime: freshRun.pausedTime + validationDuration,
+            },
+          });
+        } else {
+          set({ isValidating: false, validationStartTime: null });
+        }
       }
       
       // Log validation
@@ -512,6 +534,8 @@ export const useGameStore = create<GameState>()(
         currentRound: null,
         feedback: { visible: false, type: 'correct' },
         isLoading: false,
+        isValidating: false,
+        validationStartTime: null,
         eventLog: [],
       });
     },
@@ -536,6 +560,25 @@ export const useGameStore = create<GameState>()(
       const { currentRound } = get();
       if (!currentRound) return undefined;
       return getRule(currentRound.ruleId);
+    },
+    
+    // Get effective elapsed time (excluding paused time during validation)
+    getEffectiveElapsedTime: () => {
+      const { run, isValidating, validationStartTime } = get();
+      if (!run) return 0;
+      
+      const now = Date.now();
+      let elapsed = now - run.startTime;
+      
+      // Subtract already accumulated paused time
+      elapsed -= run.pausedTime;
+      
+      // If currently validating, also subtract the ongoing validation time
+      if (isValidating && validationStartTime) {
+        elapsed -= (now - validationStartTime);
+      }
+      
+      return Math.max(0, elapsed);
     },
   }))
 );

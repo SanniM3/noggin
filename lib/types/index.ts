@@ -103,6 +103,7 @@ export interface Run {
   selectedRuleId?: string; // For practice mode
   timerDuration?: number; // For sprint mode (legacy)
   duration?: number; // Duration in seconds for timed modes
+  pausedTime: number; // Total time paused (e.g., during AI validation)
 }
 
 // ===== Event Log Types =====

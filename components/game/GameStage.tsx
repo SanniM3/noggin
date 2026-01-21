@@ -33,6 +33,10 @@ export function GameStage({ onExit, onSettings }: GameStageProps) {
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const hasEndedRef = useRef(false);
+  // Track the last time we paused/unpaused to calculate offset
+  const pauseOffsetRef = useRef(0);
+  const lastPausedRef = useRef(false);
+  const pauseStartRef = useRef<number | null>(null);
 
   const rule = currentRound ? getRule(currentRound.ruleId) : null;
 
@@ -40,20 +44,50 @@ export function GameStage({ onExit, onSettings }: GameStageProps) {
   useEffect(() => {
     if (!run || run.mode !== 'sprint' || !run.timerDuration) return;
 
-    // Initialize time remaining
-    const elapsed = Date.now() - run.startTime;
-    const remaining = Math.max(0, run.timerDuration - elapsed);
+    // Initialize
+    const initialElapsed = Date.now() - run.startTime - run.pausedTime;
+    const remaining = Math.max(0, run.timerDuration - initialElapsed);
     setTimeRemaining(remaining);
     hasEndedRef.current = false;
+    pauseOffsetRef.current = run.pausedTime;
+    lastPausedRef.current = false;
+    pauseStartRef.current = null;
 
-    // Start the timer interval
+    // Start the timer interval - always runs, but pauses when user has no control
     timerRef.current = setInterval(() => {
-      const newElapsed = Date.now() - run.startTime;
-      const newRemaining = Math.max(0, run.timerDuration! - newElapsed);
+      // Get current state directly from store
+      const state = useGameStore.getState();
+      
+      // Timer should pause when user has no control:
+      // 1. AI validation in progress (isValidating = true)
+      // 2. Any feedback dialog is visible (user needs to dismiss it)
+      const shouldPause = state.isValidating || state.feedback.visible;
+      
+      // Track pause start/end
+      if (shouldPause && !lastPausedRef.current) {
+        // Just started pausing - record pause start time
+        pauseStartRef.current = Date.now();
+      } else if (!shouldPause && lastPausedRef.current && pauseStartRef.current) {
+        // Just finished pausing - add pause duration to offset
+        const pauseDuration = Date.now() - pauseStartRef.current;
+        pauseOffsetRef.current += pauseDuration;
+        pauseStartRef.current = null;
+      }
+      lastPausedRef.current = shouldPause;
+      
+      // Calculate remaining time, accounting for pauses
+      let totalPaused = pauseOffsetRef.current;
+      if (shouldPause && pauseStartRef.current) {
+        // Currently paused - add ongoing pause time
+        totalPaused += Date.now() - pauseStartRef.current;
+      }
+      
+      const elapsed = Date.now() - run.startTime - totalPaused;
+      const newRemaining = Math.max(0, run.timerDuration! - elapsed);
       setTimeRemaining(newRemaining);
 
-      // End the game when time runs out
-      if (newRemaining <= 0 && !hasEndedRef.current) {
+      // End the game when time runs out (but not during pause)
+      if (newRemaining <= 0 && !hasEndedRef.current && !shouldPause) {
         hasEndedRef.current = true;
         clearInterval(timerRef.current!);
         endRun();
