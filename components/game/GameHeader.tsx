@@ -7,13 +7,29 @@ import { cn } from '@/lib/utils/cn';
 
 interface GameHeaderProps {
   run: Run;
+  timeRemaining?: number; // in milliseconds, for sprint mode
   onSettingsClick?: () => void;
   onExitClick?: () => void;
 }
 
-export function GameHeader({ run, onSettingsClick, onExitClick }: GameHeaderProps) {
+export function GameHeader({ run, timeRemaining, onSettingsClick, onExitClick }: GameHeaderProps) {
   const correctCount = run.rounds.filter(r => r.result?.correct).length;
   const totalCount = run.rounds.length;
+
+  // Format time remaining for display
+  const formatTimeRemaining = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) {
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${seconds}s`;
+  };
+
+  // Determine if time is critical (less than 10 seconds)
+  const isCritical = timeRemaining !== undefined && timeRemaining <= 10000 && timeRemaining > 0;
+  const isWarning = timeRemaining !== undefined && timeRemaining <= 30000 && timeRemaining > 10000;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 bg-noggin-bg/80 backdrop-blur-lg border-b border-noggin-border">
@@ -39,8 +55,34 @@ export function GameHeader({ run, onSettingsClick, onExitClick }: GameHeaderProp
           </svg>
         </button>
 
-        {/* Center: Score and streak */}
-        <div className="flex items-center gap-6">
+        {/* Center: Score, streak, and timer */}
+        <div className="flex items-center gap-4 md:gap-6">
+          {/* Timer for Sprint mode */}
+          {run.mode === 'sprint' && timeRemaining !== undefined && (
+            <motion.div 
+              className="text-center"
+              animate={isCritical ? { scale: [1, 1.05, 1] } : {}}
+              transition={{ duration: 0.5, repeat: isCritical ? Infinity : 0 }}
+            >
+              <motion.div
+                className={cn(
+                  'text-2xl md:text-3xl font-display font-bold tabular-nums',
+                  isCritical && 'text-feedback-incorrect',
+                  isWarning && !isCritical && 'text-feedback-warning',
+                  !isWarning && !isCritical && 'text-noggin-accent'
+                )}
+                key={Math.floor(timeRemaining / 1000)}
+                initial={{ scale: 1.1 }}
+                animate={{ scale: 1 }}
+              >
+                {formatTimeRemaining(timeRemaining)}
+              </motion.div>
+              <div className="text-xs text-noggin-text-muted uppercase tracking-wider">
+                Time
+              </div>
+            </motion.div>
+          )}
+
           {/* Score */}
           <div className="text-center">
             <motion.div
@@ -126,6 +168,24 @@ export function GameHeader({ run, onSettingsClick, onExitClick }: GameHeaderProp
           {run.mode === 'practice' && 'Practice'}
         </div>
       </div>
+
+      {/* Timer progress bar for Sprint mode */}
+      {run.mode === 'sprint' && run.timerDuration && timeRemaining !== undefined && (
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-noggin-border">
+          <motion.div
+            className={cn(
+              'h-full transition-colors duration-300',
+              isCritical ? 'bg-feedback-incorrect' :
+              isWarning ? 'bg-feedback-warning' :
+              'bg-noggin-accent'
+            )}
+            style={{
+              width: `${(timeRemaining / run.timerDuration) * 100}%`,
+            }}
+            transition={{ duration: 0.1 }}
+          />
+        </div>
+      )}
     </header>
   );
 }

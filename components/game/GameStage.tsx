@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/lib/store/gameStore';
 import { getRule } from '@/lib/engine/rules';
@@ -24,10 +24,54 @@ export function GameStage({ onExit, onSettings }: GameStageProps) {
     submitAnswer,
     skipRound,
     nextRound,
+    endRun,
     clearFeedback,
   } = useGameStore();
 
+  // Timer state for Sprint mode
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasEndedRef = useRef(false);
+
   const rule = currentRound ? getRule(currentRound.ruleId) : null;
+
+  // Initialize and run timer for Sprint mode
+  useEffect(() => {
+    if (!run || run.mode !== 'sprint' || !run.timerDuration) return;
+
+    // Initialize time remaining
+    const elapsed = Date.now() - run.startTime;
+    const remaining = Math.max(0, run.timerDuration - elapsed);
+    setTimeRemaining(remaining);
+    hasEndedRef.current = false;
+
+    // Start the timer interval
+    timerRef.current = setInterval(() => {
+      const newElapsed = Date.now() - run.startTime;
+      const newRemaining = Math.max(0, run.timerDuration! - newElapsed);
+      setTimeRemaining(newRemaining);
+
+      // End the game when time runs out
+      if (newRemaining <= 0 && !hasEndedRef.current) {
+        hasEndedRef.current = true;
+        clearInterval(timerRef.current!);
+        endRun();
+      }
+    }, 100);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [run?.id, run?.mode, run?.timerDuration, run?.startTime, endRun]);
+
+  // Cleanup timer when run ends
+  useEffect(() => {
+    if (run?.endTime && timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+  }, [run?.endTime]);
 
   // Keyboard controls
   const handleKeyDown = useCallback(
@@ -82,6 +126,7 @@ export function GameStage({ onExit, onSettings }: GameStageProps) {
       {/* Header */}
       <GameHeader
         run={run}
+        timeRemaining={run.mode === 'sprint' && timeRemaining !== null ? timeRemaining : undefined}
         onSettingsClick={onSettings}
         onExitClick={onExit}
       />

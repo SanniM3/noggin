@@ -25,8 +25,8 @@ export function RunSummary({ run, onPlayAgain, onExit, onShare }: RunSummaryProp
   const totalRounds = run.rounds.length;
   const correctRounds = run.rounds.filter((r) => r.result?.correct).length;
   const accuracy = calculateAccuracy(correctRounds, totalRounds);
-  const avgResponseTime =
-    run.rounds.reduce((sum, r) => sum + (r.result?.responseTime || 0), 0) / totalRounds;
+  const totalResponseTime = run.rounds.reduce((sum, r) => sum + (r.result?.responseTime || 0), 0);
+  const avgResponseTime = totalRounds > 0 ? totalResponseTime / totalRounds : 0;
   const rating = getPerformanceRating(accuracy);
   const ratingColor = getPerformanceColor(accuracy);
 
