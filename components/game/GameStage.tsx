@@ -20,6 +20,7 @@ export function GameStage({ onExit, onSettings }: GameStageProps) {
     run,
     currentRound,
     feedback,
+    isValidating,
     updateInput,
     submitAnswer,
     skipRound,
@@ -189,6 +190,7 @@ export function GameStage({ onExit, onSettings }: GameStageProps) {
       {/* Feedback overlay */}
       <ScoreFeedback
         feedback={feedback}
+        isValidating={isValidating}
         onNext={nextRound}
         onOverride={handleOverride}
         showAdjudication={feedback.type === 'warning'}

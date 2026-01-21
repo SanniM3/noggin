@@ -101,7 +101,8 @@ export interface Run {
   roundIndex: number;
   rounds: Round[];
   selectedRuleId?: string; // For practice mode
-  timerDuration?: number; // For sprint mode
+  timerDuration?: number; // For sprint mode (legacy)
+  duration?: number; // Duration in seconds for timed modes
 }
 
 // ===== Event Log Types =====
@@ -212,6 +213,7 @@ export interface FeedbackState {
   type: 'correct' | 'warning' | 'incorrect';
   score?: number;
   message?: string;
+  details?: string[]; // Additional context for the feedback
 }
 
 export interface ModalState {

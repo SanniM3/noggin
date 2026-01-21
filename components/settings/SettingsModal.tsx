@@ -1,6 +1,7 @@
 'use client';
 
 import { useSettingsStore } from '@/lib/store/settingsStore';
+import { useGameStore } from '@/lib/store/gameStore';
 import { Modal } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils/cn';
 
@@ -11,6 +12,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const settings = useSettingsStore();
+  const { settings: gameSettings, setUseAIValidation } = useGameStore();
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Settings" size="md">
@@ -82,6 +84,27 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               checked={settings.reducedMotion}
               onChange={settings.toggleReducedMotion}
             />
+          </div>
+        </section>
+
+        {/* AI Validation Section */}
+        <section>
+          <h3 className="text-sm font-semibold text-noggin-text-muted uppercase tracking-wider mb-3">
+            🤖 AI Validation
+          </h3>
+          <div className="space-y-4">
+            <SettingToggle
+              label="AI Answer Verification"
+              description="Use AI to validate words, celebrities, and associations"
+              checked={gameSettings.useAIValidation}
+              onChange={() => setUseAIValidation(!gameSettings.useAIValidation)}
+            />
+            {gameSettings.useAIValidation && (
+              <div className="text-xs text-noggin-text-muted bg-noggin-bg/50 p-3 rounded-lg">
+                <p className="font-medium text-noggin-accent mb-1">Requires OpenAI API Key</p>
+                <p>Set <code className="bg-noggin-bg px-1 rounded">OPENAI_API_KEY</code> in your environment to enable AI validation. Without it, answers will be accepted with a warning.</p>
+              </div>
+            )}
           </div>
         </section>
 

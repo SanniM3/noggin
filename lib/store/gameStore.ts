@@ -10,10 +10,12 @@ import {
   GameEvent,
   GameEventType,
   FeedbackState,
+  ValidationResult,
 } from '@/lib/types';
 import { generateLetterPair, selectRule, getDailyChallengeSeed } from '@/lib/engine/generator';
 import { getRule } from '@/lib/engine/rules';
 import { createRoundResult } from '@/lib/engine/scoring';
+import { validateWithAI } from '@/lib/engine/aiValidator';
 
 interface GameState {
   // Current run state
@@ -23,21 +25,28 @@ interface GameState {
   // UI state
   feedback: FeedbackState;
   isLoading: boolean;
+  isValidating: boolean; // AI validation in progress
   
   // Event log
   eventLog: GameEvent[];
+  
+  // Settings
+  settings: {
+    useAIValidation: boolean;
+  };
   
   // Actions
   startRun: (mode: GameMode, options?: StartRunOptions) => void;
   dealRound: () => void;
   revealRule: () => void;
   updateInput: (fieldId: string, value: string) => void;
-  submitAnswer: (selfOverride?: boolean) => void;
+  submitAnswer: (selfOverride?: boolean) => Promise<void>;
   skipRound: () => void;
   nextRound: () => void;
   endRun: () => void;
   resetGame: () => void;
   clearFeedback: () => void;
+  setUseAIValidation: (enabled: boolean) => void;
   
   // Computed
   getCurrentRule: () => ReturnType<typeof getRule>;
@@ -71,7 +80,11 @@ export const useGameStore = create<GameState>()(
     currentRound: null,
     feedback: { visible: false, type: 'correct' },
     isLoading: false,
+    isValidating: false,
     eventLog: [],
+    settings: {
+      useAIValidation: true, // AI validation enabled by default
+    },
     
     // Start a new run
     startRun: (mode, options = {}) => {
@@ -93,6 +106,7 @@ export const useGameStore = create<GameState>()(
         rounds: [],
         selectedRuleId: options.selectedRuleId,
         timerDuration: options.timerDuration,
+        duration: options.timerDuration, // Used by Timer component
       };
       
       set({
@@ -194,9 +208,9 @@ export const useGameStore = create<GameState>()(
       });
     },
     
-    // Submit answer
-    submitAnswer: (selfOverride = false) => {
-      const { run, currentRound, eventLog } = get();
+    // Submit answer (async for AI validation)
+    submitAnswer: async (selfOverride = false) => {
+      const { run, currentRound, eventLog, settings } = get();
       if (!run || !currentRound) return;
       
       // Allow submission in active phase, or in resolve phase with selfOverride (adjudication)
@@ -209,11 +223,6 @@ export const useGameStore = create<GameState>()(
       // Calculate response time
       const responseTime = Date.now() - currentRound.startTime;
       
-      // Validate answer
-      const validationResult = rule.validator.autoCheck
-        ? rule.validator.autoCheck(currentRound.inputValues, currentRound.letters)
-        : { status: 'warning' as const, message: 'Self-judge required' };
-      
       // Log submission (only if not already in adjudication)
       const submissionEvent = !isAdjudication 
         ? createEvent('ANSWER_SUBMITTED', {
@@ -221,6 +230,105 @@ export const useGameStore = create<GameState>()(
             responseTime,
           })
         : null;
+      
+      // Step 1: Run local constraint check first (instant)
+      let validationResult: ValidationResult;
+      
+      if (selfOverride) {
+        // User is overriding during adjudication - accept as correct
+        validationResult = { status: 'valid', message: 'Self-awarded' };
+      } else if (rule.validator.autoCheck) {
+        // Run local check first
+        validationResult = rule.validator.autoCheck(currentRound.inputValues, currentRound.letters);
+      } else {
+        // No auto-check available
+        validationResult = { status: 'warning', message: 'Checking...' };
+      }
+      
+      // If local check fails immediately (invalid), no need for AI
+      if (validationResult.status === 'invalid') {
+        const validationEvent = createEvent('ANSWER_VALIDATED', {
+          validationResult,
+          selfOverride: false,
+        });
+        
+        const roundResult = createRoundResult(
+          validationResult,
+          responseTime,
+          run.streak,
+          run.difficulty,
+          false
+        );
+        
+        const completedRound: Round = {
+          ...currentRound,
+          phase: 'resolve',
+          result: roundResult,
+        };
+        
+        set({
+          run: {
+            ...run,
+            streak: 0,
+            rounds: [...run.rounds, completedRound],
+          },
+          currentRound: completedRound,
+          feedback: {
+            visible: true,
+            type: 'incorrect',
+            message: validationResult.message || 'Not quite!',
+          },
+          eventLog: [
+            ...eventLog,
+            ...(submissionEvent ? [submissionEvent] : []),
+            validationEvent,
+            createEvent('ROUND_RESOLVED', { result: roundResult }),
+          ],
+        });
+        return;
+      }
+      
+      // Step 2: If AI validation is enabled and not self-override, call AI
+      if (settings.useAIValidation && !selfOverride) {
+        // Show validating state
+        set({ 
+          isValidating: true,
+          feedback: {
+            visible: true,
+            type: 'warning',
+            message: '🤖 Checking answer...',
+          },
+        });
+        
+        try {
+          // Call AI validator
+          const aiResult = await validateWithAI(
+            currentRound.ruleId,
+            currentRound.letters,
+            currentRound.inputValues
+          );
+          
+          // Get fresh state after async call
+          const freshState = get();
+          if (!freshState.run || !freshState.currentRound) {
+            set({ isValidating: false });
+            return;
+          }
+          
+          // Use AI result
+          validationResult = aiResult;
+          
+        } catch (error) {
+          console.error('AI validation error:', error);
+          // Fail open - fall back to local result
+          validationResult = { 
+            status: 'warning', 
+            message: 'Could not verify - please self-judge' 
+          };
+        }
+        
+        set({ isValidating: false });
+      }
       
       // Log validation
       const validationEvent = createEvent('ANSWER_VALIDATED', {
@@ -239,6 +347,7 @@ export const useGameStore = create<GameState>()(
             visible: true,
             type: 'warning',
             message: validationResult.message,
+            details: validationResult.details,
           },
           eventLog: [...eventLog, ...(submissionEvent ? [submissionEvent] : []), validationEvent],
         });
@@ -246,8 +355,13 @@ export const useGameStore = create<GameState>()(
       }
       
       // Calculate result
+      const isCorrect = validationResult.status === 'valid' || selfOverride;
+      const finalResult: ValidationResult = isCorrect 
+        ? { status: 'valid', message: validationResult.message || 'Correct!' }
+        : validationResult;
+      
       const roundResult = createRoundResult(
-        validationResult,
+        finalResult,
         responseTime,
         run.streak,
         run.difficulty,
@@ -285,8 +399,8 @@ export const useGameStore = create<GameState>()(
           type: roundResult.correct ? 'correct' : 'incorrect',
           score: roundResult.correct ? roundResult.score : undefined,
           message: roundResult.correct 
-            ? (roundResult.streakBonus > 0 ? `🔥 ${newStreak} streak!` : 'Correct!')
-            : 'Not quite!',
+            ? (roundResult.streakBonus > 0 ? `🔥 ${newStreak} streak!` : validationResult.message || 'Correct!')
+            : (validationResult.message || 'Not quite!'),
         },
         eventLog: [
           ...eventLog,
@@ -405,6 +519,16 @@ export const useGameStore = create<GameState>()(
     // Clear feedback
     clearFeedback: () => {
       set({ feedback: { visible: false, type: 'correct' } });
+    },
+    
+    // Toggle AI validation
+    setUseAIValidation: (enabled: boolean) => {
+      set({
+        settings: {
+          ...get().settings,
+          useAIValidation: enabled,
+        },
+      });
     },
     
     // Get current rule

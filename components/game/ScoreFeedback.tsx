@@ -6,17 +6,33 @@ import { cn } from '@/lib/utils/cn';
 
 interface ScoreFeedbackProps {
   feedback: FeedbackState;
+  isValidating?: boolean;
   onNext?: () => void;
   onOverride?: (accept: boolean) => void;
   showAdjudication?: boolean;
 }
 
+// Spinner component
+function Spinner() {
+  return (
+    <motion.div
+      className="w-16 h-16 border-4 border-noggin-accent/30 border-t-noggin-accent rounded-full"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+    />
+  );
+}
+
 export function ScoreFeedback({
   feedback,
+  isValidating = false,
   onNext,
   onOverride,
   showAdjudication = false,
 }: ScoreFeedbackProps) {
+  // Check if this is the "checking" state
+  const isChecking = feedback.message === '🤖 Checking answer...';
+
   return (
     <AnimatePresence>
       {feedback.visible && (
@@ -32,7 +48,7 @@ export function ScoreFeedback({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={feedback.type !== 'warning' ? onNext : undefined}
+            onClick={!isChecking && feedback.type !== 'warning' ? onNext : undefined}
           />
 
           {/* Content */}
@@ -48,16 +64,22 @@ export function ScoreFeedback({
             exit={{ scale: 0.8, y: 20 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
           >
-            {/* Icon */}
+            {/* Icon or Spinner */}
             <motion.div
-              className="text-6xl mb-4"
+              className="text-6xl mb-4 flex justify-center"
               initial={{ scale: 0, rotate: -180 }}
               animate={{ scale: 1, rotate: 0 }}
               transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.1 }}
             >
-              {feedback.type === 'correct' && '✓'}
-              {feedback.type === 'incorrect' && '✗'}
-              {feedback.type === 'warning' && '⚠'}
+              {isChecking ? (
+                <Spinner />
+              ) : (
+                <>
+                  {feedback.type === 'correct' && '✓'}
+                  {feedback.type === 'incorrect' && '✗'}
+                  {feedback.type === 'warning' && '⚠'}
+                </>
+              )}
             </motion.div>
 
             {/* Message */}
@@ -79,6 +101,20 @@ export function ScoreFeedback({
               )}
             </motion.h2>
 
+            {/* Details (AI validation feedback) */}
+            {feedback.details && feedback.details.length > 0 && (
+              <motion.div
+                className="mt-3 text-sm text-noggin-text-muted space-y-1"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.2 }}
+              >
+                {feedback.details.map((detail, i) => (
+                  <p key={i}>{detail}</p>
+                ))}
+              </motion.div>
+            )}
+
             {/* Score popup */}
             {feedback.type === 'correct' && feedback.score !== undefined && (
               <motion.div
@@ -92,7 +128,7 @@ export function ScoreFeedback({
             )}
 
             {/* Adjudication buttons for manual/semi validation */}
-            {showAdjudication && feedback.type === 'warning' && onOverride && (
+            {showAdjudication && feedback.type === 'warning' && onOverride && !isChecking && (
               <motion.div
                 className="flex gap-3 mt-6 justify-center"
                 initial={{ opacity: 0, y: 10 }}
@@ -128,7 +164,7 @@ export function ScoreFeedback({
             )}
 
             {/* Auto-continue hint */}
-            {feedback.type !== 'warning' && (
+            {feedback.type !== 'warning' && !isChecking && (
               <motion.p
                 className="mt-4 text-sm text-noggin-text-muted"
                 initial={{ opacity: 0 }}
