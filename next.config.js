@@ -4,8 +4,6 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Optimize for static export (Netlify)
-  output: 'export',
   trailingSlash: true,
 };
 
